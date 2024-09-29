@@ -1,9 +1,11 @@
 use crate::market_data::market_data_service::MarketDataService;
-use crate::models::{Asset, AssetProfile, NewAsset, Quote, QuoteSummary};
+use crate::models::{Asset, AssetProfile, NewAsset, Quote, QuoteSummary, UpdateAssetProfile};
+use crate::providers::market_data_provider::MarketDataError;
 use crate::schema::{assets, quotes};
 use diesel::prelude::*;
 use diesel::SqliteConnection;
 use std::sync::Arc;
+
 pub struct AssetService {
     market_data_service: Arc<MarketDataService>,
 }
@@ -54,6 +56,8 @@ impl AssetService {
         conn: &mut SqliteConnection,
         asset_id: &str,
     ) -> Result<AssetProfile, diesel::result::Error> {
+        println!("Fetching asset data for asset_id: {}", asset_id);
+
         let asset = assets::table
             .filter(assets::id.eq(asset_id))
             .first::<Asset>(conn)?;
@@ -63,10 +67,29 @@ impl AssetService {
             .order(quotes::date.desc())
             .load::<Quote>(conn)?;
 
-        Ok(AssetProfile {
+        let asset_profile = AssetProfile {
             asset,
             quote_history,
-        })
+        };
+
+        Ok(asset_profile)
+    }
+
+    pub fn update_asset_profile(
+        &self,
+        conn: &mut SqliteConnection,
+        asset_id: &str,
+        payload: UpdateAssetProfile,
+    ) -> Result<(), diesel::result::Error> {
+        diesel::update(assets::table.filter(assets::id.eq(asset_id)))
+            .set((
+                assets::sectors.eq(&payload.sectors),
+                assets::countries.eq(&payload.countries),
+                assets::comment.eq(payload.comment),
+                assets::asset_sub_class.eq(&payload.asset_sub_class),
+            ))
+            .execute(conn)?;
+        Ok(())
     }
 
     pub fn load_currency_assets(
@@ -209,7 +232,7 @@ impl AssetService {
         self.market_data_service.get_history_quotes(conn)
     }
 
-    pub async fn search_ticker(&self, query: &str) -> Result<Vec<QuoteSummary>, String> {
+    pub async fn search_ticker(&self, query: &str) -> Result<Vec<QuoteSummary>, MarketDataError> {
         self.market_data_service.search_symbol(query).await
     }
 
@@ -229,7 +252,7 @@ impl AssetService {
                 // symbol not found in database. Fetching from market data service.
                 let fetched_profile = self
                     .market_data_service
-                    .fetch_symbol_summary(asset_id)
+                    .get_symbol_profile(asset_id)
                     .await
                     .map_err(|e| {
                         println!(
