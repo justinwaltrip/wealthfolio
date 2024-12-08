@@ -26,6 +26,7 @@ import { Input } from '@/components/ui/input';
 
 import { newGoalSchema } from '@/lib/schemas';
 import { useGoalMutations } from '@/pages/settings/goals/useGoalMutations';
+import { MoneyInput } from '@/components/ui/money-input';
 
 type NewGoal = z.infer<typeof newGoalSchema>;
 
@@ -97,7 +98,7 @@ export function GoalForm({ defaultValues, onSuccess = () => {} }: GoalFormlProps
               <FormItem>
                 <FormLabel>Target amount</FormLabel>
                 <FormControl>
-                  <Input type="number" inputMode="decimal" placeholder="Target amount" {...field} />
+                  <MoneyInput placeholder="Target amount" {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>

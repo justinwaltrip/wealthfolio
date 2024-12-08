@@ -1,48 +1,82 @@
-import * as React from "react"
-import { cn } from "@/lib/utils"
+import { forwardRef, useState } from 'react';
+import type { ButtonProps } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
+import { Icons } from '@/components/icons';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
+import { worldCurrencies } from '@/lib/currencies';
 
-export interface InputProps
-  extends React.InputHTMLAttributes<HTMLInputElement> {}
+interface CurrencyInputCustomProps {
+  value?: string;
+  onChange: (value: string) => void;
+}
 
-const CurrencyInput = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, ...props }, ref) => {
-    const { onChange } = props
+type CurrencyInputProps = CurrencyInputCustomProps & Omit<ButtonProps, 'onChange' | 'value'>;
 
-    /**
-     * Override onChange to handle currency formatting
-     * 
-     * - If the value begins with $, remove it
-     * - If the value contains a comma, remove it
-     * 
-     * @param e - React.ChangeEvent<HTMLInputElement>
-     */
-    const customOnChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        let val = e.target.value
-        if (val.startsWith("$")) {
-            val = val.slice(1)
-        }
-        if (val.includes(",")) {
-            val = val.replace(/,/g, "")
-        }
-
-        // call the original onChange
-        e.target.value = val
-        onChange && onChange(e)
-    }
+export const CurrencyInput = forwardRef<HTMLButtonElement, CurrencyInputProps>(
+  ({ value, onChange, className, ...props }, ref) => {
+    const [open, setOpen] = useState(false);
 
     return (
-      <input
-        className={cn(
-          "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
-          className
-        )}
-        ref={ref}
-        {...props}
-        onChange={customOnChange}
-      />
-    )
-  }
-)
-CurrencyInput.displayName = "CurrencyInput"
+      <Popover open={open} onOpenChange={setOpen} modal={true}>
+        <PopoverTrigger asChild>
+          <Button
+            ref={ref}
+            type="button"
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            className={cn('w-full justify-between', !value && 'text-muted-foreground', className)}
+            {...props}
+          >
+            {value
+              ? worldCurrencies.find((currency) => currency.value === value)?.label
+              : 'Select account currency'}
+            <Icons.ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-full p-0">
+          <Command>
+            <CommandInput placeholder="Search currency..." className="h-9" />
+            <CommandList>
+              <CommandEmpty>No currency found.</CommandEmpty>
+              <CommandGroup>
+                <ScrollArea className="max-h-96 overflow-y-auto">
+                  {worldCurrencies.map((currency) => (
+                    <CommandItem
+                      value={currency.label}
+                      key={currency.value}
+                      onSelect={() => {
+                        onChange(currency.value);
+                        setOpen(false);
+                      }}
+                    >
+                      {currency.label}
+                      <Icons.Check
+                        className={cn(
+                          'ml-auto h-4 w-4',
+                          currency.value === value ? 'opacity-100' : 'opacity-0',
+                        )}
+                      />
+                    </CommandItem>
+                  ))}
+                </ScrollArea>
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    );
+  },
+);
 
-export { CurrencyInput }
+CurrencyInput.displayName = 'CurrencyInput';

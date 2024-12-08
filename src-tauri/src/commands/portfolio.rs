@@ -2,6 +2,7 @@ use crate::models::{AccountSummary, HistorySummary, Holding, IncomeSummary, Port
 use crate::portfolio::portfolio_service::PortfolioService;
 use crate::AppState;
 
+use log::debug;
 use tauri::State;
 
 async fn create_portfolio_service(state: &State<'_, AppState>) -> Result<PortfolioService, String> {
@@ -17,7 +18,7 @@ pub async fn calculate_historical_data(
     account_ids: Option<Vec<String>>,
     force_full_calculation: bool,
 ) -> Result<Vec<HistorySummary>, String> {
-    println!("Calculate portfolio historical...");
+    debug!("Calculate portfolio historical...");
     let service = create_portfolio_service(&state).await?;
     let mut conn = state.pool.get().map_err(|e| e.to_string())?;
 
@@ -29,10 +30,6 @@ pub async fn calculate_historical_data(
 
 #[tauri::command]
 pub async fn compute_holdings(state: State<'_, AppState>) -> Result<Vec<Holding>, String> {
-    use std::time::Instant;
-    println!("Compute holdings...");
-    let start = Instant::now();
-
     let service = create_portfolio_service(&state).await?;
     let mut conn = state.pool.get().map_err(|e| e.to_string())?;
 
@@ -42,23 +39,19 @@ pub async fn compute_holdings(state: State<'_, AppState>) -> Result<Vec<Holding>
         .map_err(|e| e.to_string())
         .map(|vec| Ok(vec))?;
 
-    let duration = start.elapsed();
-    println!("Compute holdings completed in: {:?}", duration);
-
     result
 }
 
 #[tauri::command]
-pub async fn get_account_history(
+pub async fn get_portfolio_history(
     state: State<'_, AppState>,
-    account_id: String,
+    account_id: Option<&str>,
 ) -> Result<Vec<PortfolioHistory>, String> {
-    println!("Fetching account history for account ID: {}", account_id);
     let service = create_portfolio_service(&state).await?;
     let mut conn = state.pool.get().map_err(|e| e.to_string())?;
 
     service
-        .get_account_history(&mut conn, &account_id)
+        .get_portfolio_history(&mut conn, account_id)
         .map_err(|e| format!("Failed to fetch account history: {}", e))
 }
 
@@ -66,7 +59,7 @@ pub async fn get_account_history(
 pub async fn get_accounts_summary(
     state: State<'_, AppState>,
 ) -> Result<Vec<AccountSummary>, String> {
-    println!("Fetching active accounts performance...");
+    debug!("Fetching active accounts performance...");
     let service = create_portfolio_service(&state).await?;
     let mut conn = state.pool.get().map_err(|e| e.to_string())?;
 
@@ -79,7 +72,7 @@ pub async fn get_accounts_summary(
 pub async fn recalculate_portfolio(
     state: State<'_, AppState>,
 ) -> Result<Vec<HistorySummary>, String> {
-    println!("Recalculating portfolio...");
+    debug!("Recalculating portfolio...");
     let service = create_portfolio_service(&state).await?;
     let mut conn = state.pool.get().map_err(|e| e.to_string())?;
 
@@ -91,7 +84,7 @@ pub async fn recalculate_portfolio(
 
 #[tauri::command]
 pub async fn get_income_summary(state: State<'_, AppState>) -> Result<Vec<IncomeSummary>, String> {
-    println!("Fetching income summary...");
+    debug!("Fetching income summary...");
     let service = create_portfolio_service(&state).await?;
     let mut conn = state.pool.get().map_err(|e| e.to_string())?;
 

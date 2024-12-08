@@ -1,27 +1,34 @@
-use crate::models::{Asset, ExchangeRate, NewAsset, Quote, QuoteSummary};
-use crate::providers::market_data_factory::{MarketDataFactory, DEFAULT_PROVIDER};
-use crate::providers::market_data_provider::{MarketDataError, MarketDataProvider};
+use crate::models::{Activity, Asset, ExchangeRate, NewAsset, Quote, QuoteSummary};
+use crate::providers::market_data_factory::MarketDataFactory;
+use crate::providers::market_data_provider::{
+    MarketDataError, MarketDataProvider, MarketDataProviderType,
+};
 use crate::schema::{activities, exchange_rates, quotes};
 use chrono::{Duration, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use diesel::prelude::*;
 use diesel::SqliteConnection;
+use log::{debug, error};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 pub struct MarketDataService {
-    provider: Arc<dyn MarketDataProvider>,
+    public_data_provider: Arc<dyn MarketDataProvider>,
+    private_data_provider: Arc<dyn MarketDataProvider>,
 }
 
 impl MarketDataService {
     pub async fn new() -> Self {
         MarketDataService {
-            provider: MarketDataFactory::get_provider(Some(DEFAULT_PROVIDER)).await,
+            public_data_provider: MarketDataFactory::get_provider(MarketDataProviderType::Yahoo)
+                .await,
+            private_data_provider: MarketDataFactory::get_provider(MarketDataProviderType::Manual)
+                .await,
         }
     }
 
     pub async fn search_symbol(&self, query: &str) -> Result<Vec<QuoteSummary>, MarketDataError> {
-        self.provider.search_ticker(query).await
+        self.public_data_provider.search_ticker(query).await
     }
 
     pub fn get_latest_quote(
@@ -33,13 +40,6 @@ impl MarketDataService {
             .filter(quotes::symbol.eq(symbol))
             .order(quotes::date.desc())
             .first::<Quote>(conn)
-    }
-
-    pub fn get_history_quotes(
-        &self,
-        conn: &mut SqliteConnection,
-    ) -> Result<Vec<Quote>, diesel::result::Error> {
-        quotes::table.load::<Quote>(conn)
     }
 
     pub fn load_quotes(&self, conn: &mut SqliteConnection) -> HashMap<(String, NaiveDate), Quote> {
@@ -54,59 +54,156 @@ impl MarketDataService {
                 })
                 .collect(),
             Err(e) => {
-                eprintln!("Error loading quotes: {}", e);
+                error!("Error loading quotes: {}", e);
                 HashMap::new()
             }
         }
     }
 
-    pub async fn sync_quotes(
+    pub async fn sync_asset_quotes(
         &self,
         conn: &mut SqliteConnection,
-        symbols: &[String],
+        asset_list: &Vec<Asset>,
     ) -> Result<(), String> {
-        println!("Syncing history quotes for all assets...");
+        println!("Syncing history quotes for assets...");
         let end_date = SystemTime::now();
         let mut all_quotes_to_insert = Vec::new();
 
-        for symbol in symbols {
-            let last_sync_date = self
-                .get_last_quote_sync_date(conn, symbol)
-                .map_err(|e| format!("Error getting last sync date for {}: {}", symbol, e))?
-                .unwrap_or_else(|| Utc::now().naive_utc() - Duration::days(3 * 365));
-
-            let start_date: SystemTime = Utc
-                .from_utc_datetime(&(last_sync_date - Duration::days(1)))
-                .into();
-
-            match self
-                .provider
-                .get_stock_history(symbol, start_date, end_date)
-                .await
-            {
-                Ok(quotes) => all_quotes_to_insert.extend(quotes),
-                Err(e) => eprintln!("Error fetching history for {}: {}. Skipping.", symbol, e),
+        for asset in asset_list {
+            match asset.data_source.as_str() {
+                "Yahoo" => {
+                    let quotes = self.sync_public_asset_quotes(conn, asset, end_date).await?;
+                    all_quotes_to_insert.extend(quotes)
+                }
+                "MANUAL" => {
+                    let quotes = self.sync_private_asset_quotes(conn, asset).await?;
+                    all_quotes_to_insert.extend(quotes)
+                }
+                _ => continue,
             }
         }
 
         self.insert_quotes(conn, &all_quotes_to_insert)
     }
 
+    async fn sync_private_asset_quotes(
+        &self,
+        conn: &mut SqliteConnection,
+        asset: &Asset,
+    ) -> Result<Vec<Quote>, String> {
+        // Load activities for the asset
+        let activities = activities::table
+            .filter(activities::asset_id.eq(asset.symbol.as_str()))
+            .order(activities::activity_date.asc())
+            .load::<Activity>(conn)
+            .map_err(|e| format!("Failed to load activities for {}: {}", asset.symbol, e))?;
+
+        if activities.is_empty() {
+            debug!("No activities found for asset {}", asset.symbol);
+            return Ok(Vec::new());
+        }
+
+        let today = Utc::now().naive_utc().date();
+        let first_activity_date = activities[0].activity_date.date();
+        let capacity = (today - first_activity_date).num_days() as usize + 1;
+        let mut quotes = Vec::with_capacity(capacity);
+
+        // Create an iterator over activity dates and prices
+        let mut activity_changes: Vec<(NaiveDate, f64)> = activities
+            .iter()
+            .map(|activity| (activity.activity_date.date(), activity.unit_price))
+            .collect();
+        activity_changes.push((today, activity_changes.last().unwrap().1));
+
+        // Generate quotes for each day between activities
+        for window in activity_changes.windows(2) {
+            let (current_date, current_price) = window[0];
+            let next_date = window[1].0;
+            let mut date = current_date;
+
+            while date <= next_date {
+                quotes.push(Quote {
+                    id: format!("{}_{}", date.format("%Y%m%d"), asset.symbol),
+                    symbol: asset.symbol.clone(),
+                    date: date.and_hms_opt(2, 0, 0).unwrap(),
+                    open: current_price,
+                    high: current_price,
+                    low: current_price,
+                    close: current_price,
+                    adjclose: current_price,
+                    volume: 0.0, // Set to 0 since volume isn't meaningful for manual quotes
+                    data_source: "MANUAL".to_string(),
+                    created_at: Utc::now().naive_utc(),
+                });
+                date += Duration::days(1);
+            }
+        }
+
+        debug!(
+            "Generated {} quotes for asset {}",
+            quotes.len(),
+            asset.symbol
+        );
+        Ok(quotes)
+    }
+
+    async fn sync_public_asset_quotes(
+        &self,
+        conn: &mut SqliteConnection,
+        asset: &Asset,
+        end_date: SystemTime,
+    ) -> Result<Vec<Quote>, String> {
+        let symbol = asset.symbol.clone();
+        let last_sync_date = self
+            .get_last_quote_sync_date(conn, symbol.as_str())
+            .map_err(|e| {
+                format!(
+                    "Error getting last sync date for {}: {}",
+                    symbol.as_str(),
+                    e
+                )
+            })?;
+
+        let start_date: SystemTime = Utc
+            .from_utc_datetime(&(last_sync_date - Duration::days(1)))
+            .into();
+
+        match self
+            .public_data_provider
+            .get_stock_history(&asset.symbol, start_date, end_date)
+            .await
+        {
+            Ok(quotes) => return Ok(quotes),
+            Err(e) => Err(format!("Failed to fetch quotes for {}: {}", symbol, e)),
+        }
+    }
+
     fn get_last_quote_sync_date(
         &self,
         conn: &mut SqliteConnection,
         ticker: &str,
-    ) -> Result<Option<NaiveDateTime>, diesel::result::Error> {
-        quotes::table
+    ) -> Result<NaiveDateTime, diesel::result::Error> {
+        let five_years_ago = Utc::now().naive_utc() - Duration::days(5 * 365);
+
+        // First try to get the most recent quote
+        let last_quote_date = quotes::table
             .filter(quotes::symbol.eq(ticker))
             .select(diesel::dsl::max(quotes::date))
-            .first::<Option<NaiveDateTime>>(conn)
-            .or_else(|_| {
-                activities::table
-                    .filter(activities::asset_id.eq(ticker))
-                    .select(diesel::dsl::min(activities::activity_date))
-                    .first::<Option<NaiveDateTime>>(conn)
-            })
+            .first::<Option<NaiveDateTime>>(conn)?;
+
+        if let Some(date) = last_quote_date {
+            return Ok(date);
+        }
+
+        // If no quotes, try to get first activity date only if it's older than 5 years
+        let first_activity_date = activities::table
+            .filter(activities::asset_id.eq(ticker))
+            .select(diesel::dsl::min(activities::activity_date))
+            .first::<Option<NaiveDateTime>>(conn)?;
+
+        Ok(first_activity_date
+            .filter(|date| *date < five_years_ago)
+            .unwrap_or(five_years_ago))
     }
 
     fn insert_quotes(&self, conn: &mut SqliteConnection, quotes: &[Quote]) -> Result<(), String> {
@@ -127,22 +224,25 @@ impl MarketDataService {
             .load::<Asset>(conn)
             .map_err(|e| format!("Failed to load assets: {}", e))?;
 
-        self.sync_quotes(
-            conn,
-            &asset_list
-                .iter()
-                .map(|asset| asset.symbol.clone())
-                .collect::<Vec<String>>(),
-        )
-        .await?;
+        match self.sync_asset_quotes(conn, &asset_list).await {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("Failed to sync asset quotes: {}", e);
+            }
+        };
 
         Ok(())
     }
+
     pub async fn get_symbol_profile(&self, symbol: &str) -> Result<NewAsset, String> {
-        self.provider
-            .get_symbol_profile(symbol)
-            .await
-            .map_err(|e| e.to_string())
+        match self.public_data_provider.get_symbol_profile(symbol).await {
+            Ok(asset) => Ok(asset),
+            Err(_) => self
+                .private_data_provider
+                .get_symbol_profile(symbol)
+                .await
+                .map_err(|e| format!("Failed to get symbol profile for {}: {}", symbol, e)),
+        }
     }
 
     pub fn get_asset_currencies(
@@ -158,13 +258,13 @@ impl MarketDataService {
             .load::<(String, String)>(conn)
             .map(|results| results.into_iter().collect::<HashMap<_, _>>())
             .unwrap_or_else(|e| {
-                eprintln!("Error fetching asset currencies: {}", e);
+                error!("Error fetching asset currencies: {}", e);
                 HashMap::new()
             })
     }
 
     pub async fn sync_exchange_rates(&self, conn: &mut SqliteConnection) -> Result<(), String> {
-        println!("Syncing exchange rates...");
+        debug!("Syncing exchange rates...");
 
         // Load existing exchange rates
         let existing_rates: Vec<ExchangeRate> = exchange_rates::table
@@ -192,7 +292,7 @@ impl MarketDataService {
                     }
                 }
                 Err(e) => {
-                    eprintln!(
+                    error!(
                         "Failed to fetch rate for {}-{}: {}. Skipping update.",
                         rate.from_currency, rate.to_currency, e
                     );
@@ -220,13 +320,17 @@ impl MarketDataService {
 
         // Try direct conversion
         let symbol = format!("{}{}=X", from, to);
-        if let Ok(quote) = self.provider.get_latest_quote(&symbol).await {
+        if let Ok(quote) = self.public_data_provider.get_latest_quote(&symbol).await {
             return Ok(quote.close);
         }
 
         // Try reverse conversion
         let reverse_symbol = format!("{}{}=X", to, from);
-        if let Ok(quote) = self.provider.get_latest_quote(&reverse_symbol).await {
+        if let Ok(quote) = self
+            .public_data_provider
+            .get_latest_quote(&reverse_symbol)
+            .await
+        {
             return Ok(1.0 / quote.close);
         }
 
@@ -243,7 +347,11 @@ impl MarketDataService {
             "".to_string()
         };
         let from_usd = if !from_usd_symbol.is_empty() {
-            match self.provider.get_latest_quote(&from_usd_symbol).await {
+            match self
+                .public_data_provider
+                .get_latest_quote(&from_usd_symbol)
+                .await
+            {
                 Ok(quote) => quote.close,
                 Err(_) => return Ok(-1.0),
             }
@@ -252,7 +360,11 @@ impl MarketDataService {
         };
 
         let to_usd = if !to_usd_symbol.is_empty() {
-            match self.provider.get_latest_quote(&to_usd_symbol).await {
+            match self
+                .public_data_provider
+                .get_latest_quote(&to_usd_symbol)
+                .await
+            {
                 Ok(quote) => quote.close,
                 Err(_) => return Ok(-1.0),
             }
@@ -261,5 +373,46 @@ impl MarketDataService {
         };
 
         Ok(from_usd / to_usd)
+    }
+
+    pub fn get_quote_history(
+        &self,
+        conn: &mut SqliteConnection,
+        a_symbol: &str,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    ) -> Result<Vec<Quote>, diesel::result::Error> {
+        use crate::schema::quotes::dsl::*;
+
+        quotes
+            .filter(symbol.eq(a_symbol))
+            .filter(date.ge(start_date.and_hms_opt(0, 0, 0).unwrap()))
+            .filter(date.le(end_date.and_hms_opt(23, 59, 59).unwrap()))
+            .order(date.asc())
+            .load::<Quote>(conn)
+    }
+
+    pub async fn refresh_quotes_for_symbols(
+        &self,
+        conn: &mut SqliteConnection,
+        symbols: &[String],
+    ) -> Result<(), String> {
+        debug!("Refreshing quotes for {} symbols", symbols.len());
+
+        use crate::schema::quotes;
+        diesel::delete(quotes::table)
+            .filter(quotes::symbol.eq_any(symbols))
+            .execute(conn)
+            .map_err(|e| format!("Failed to delete existing quotes: {}", e))?;
+
+        // Load assets for the given symbols
+        use crate::schema::assets::dsl::*;
+        let asset_list: Vec<Asset> = assets
+            .filter(crate::schema::assets::symbol.eq_any(symbols))
+            .load::<Asset>(conn)
+            .map_err(|e| format!("Failed to load assets: {}", e))?;
+
+        // Sync quotes for these assets
+        self.sync_asset_quotes(conn, &asset_list).await
     }
 }

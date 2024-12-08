@@ -1,51 +1,4 @@
-// import type { Account, Asset } from '@/generated/client';
-
-import { AccountSummary, Goal, GoalAllocation, GoalProgress, Holding } from './types';
-
-export function aggregateHoldingsBySymbol(holdings: Holding[]): Holding[] {
-  const aggregated: Record<string, Holding> = {};
-  let totalMarketValue = 0;
-
-  for (const holding of holdings) {
-    const symbol = holding.symbol;
-
-    if (!aggregated[symbol]) {
-      aggregated[symbol] = { ...holding };
-    } else {
-      aggregated[symbol].quantity += holding.quantity;
-      aggregated[symbol].marketValue = aggregated[symbol].quantity * (holding.marketPrice || 0);
-      aggregated[symbol].bookValue += holding.bookValue;
-      aggregated[symbol].marketValueConverted = holding.marketValueConverted;
-      aggregated[symbol].bookValueConverted = holding.bookValueConverted;
-      aggregated[symbol].averageCost =
-        aggregated[symbol].bookValue / (aggregated[symbol].quantity || 1);
-
-      const totalGainAmount = aggregated[symbol].marketValue - aggregated[symbol].bookValue;
-      const totalGainAmountConverted =
-        aggregated[symbol].marketValueConverted - aggregated[symbol].bookValueConverted;
-      aggregated[symbol].performance.totalGainPercent =
-        (aggregated[symbol].marketValue - aggregated[symbol].bookValue) /
-        aggregated[symbol].bookValue;
-      aggregated[symbol].performance.totalGainAmount = totalGainAmount;
-      aggregated[symbol].performance.totalGainAmountConverted = totalGainAmountConverted;
-      aggregated[symbol].performance.dayGainPercent = holding.performance.dayGainPercent;
-      aggregated[symbol].performance.dayGainAmount =
-        (holding.performance.dayGainPercent || 0) * aggregated[symbol].marketValue;
-      aggregated[symbol].performance.dayGainAmountConverted =
-        holding.performance.dayGainAmountConverted;
-    }
-
-    totalMarketValue += aggregated[symbol].marketValue;
-  }
-
-  // calculate holding percent in the portfolio
-  const result = Object.values(aggregated).map((holding) => {
-    holding.portfolioPercent = (holding.marketValue / totalMarketValue) * 100;
-    return holding;
-  });
-
-  return result;
-}
+import { AccountSummary, Goal, GoalAllocation, GoalProgress, PortfolioHistory } from './types';
 
 export function calculateGoalProgress(
   accounts: AccountSummary[],
@@ -86,4 +39,58 @@ export function calculateGoalProgress(
       currency: baseCurrency,
     };
   });
+}
+
+export function getValuesForInterval(
+  history: PortfolioHistory[],
+  interval: '1D' | '1W' | '1M' | '3M' | '1Y' | 'ALL',
+): { startValue: PortfolioHistory; endValue: PortfolioHistory; twr: number } | undefined {
+  if (history.length === 0) return undefined;
+
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  let startDate: Date;
+
+  switch (interval) {
+    case '1D':
+      startDate = new Date(now.setDate(now.getDate() - 1));
+      break;
+    case '1W':
+      startDate = new Date(now.setDate(now.getDate() - 7));
+      break;
+    case '1M':
+      startDate = new Date(now.setMonth(now.getMonth() - 1));
+      break;
+    case '3M':
+      startDate = new Date(now.setMonth(now.getMonth() - 3));
+      break;
+    case '1Y':
+      startDate = new Date(now.setFullYear(now.getFullYear() - 1));
+      break;
+    case 'ALL':
+    default:
+      startDate = new Date(0); // Earliest possible date
+  }
+
+  startDate.setHours(0, 0, 0, 0);
+
+  const sortedHistory = [...history].sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+  );
+
+  const relevantHistory = sortedHistory.filter((item) => new Date(item.date) >= startDate);
+  const startValue = relevantHistory[0] || sortedHistory[0];
+  const endValue = relevantHistory[relevantHistory.length - 1];
+
+  // Calculate TWR
+  let twr = 1;
+  for (let i = 1; i < relevantHistory.length; i++) {
+    const prev = relevantHistory[i - 1];
+    const curr = relevantHistory[i];
+    const subperiodReturn = (curr.totalValue - curr.netDeposit + prev.netDeposit) / prev.totalValue;
+    twr *= subperiodReturn;
+  }
+  twr = (twr - 1) * 100; // Convert to percentage
+
+  return { startValue, endValue, twr };
 }

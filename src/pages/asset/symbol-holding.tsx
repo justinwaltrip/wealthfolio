@@ -2,7 +2,7 @@ import React from 'react';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { formatAmount, formatPercent } from '@/lib/utils';
+import { formatAmount, formatPercent, formatStockQuantity } from '@/lib/utils';
 
 interface HoldingData {
   numShares: number;
@@ -57,8 +57,18 @@ const SymbolHoldingCard: React.FC<SymbolHoldingProps> = ({ holdingData, classNam
   return (
     <Card className={className}>
       <CardHeader className="flex flex-row items-center justify-between pb-0">
-        <CardTitle className="text-lg font-bold">{`${numShares} shares`}</CardTitle>
-        <div className="text-2xl font-extrabold">{formatAmount(marketValue, currency)}</div>
+        <CardTitle className="flex w-full justify-between text-lg font-bold">
+          <div>
+            <div>{formatStockQuantity(numShares)}</div>
+            <div className="text-sm font-normal text-muted-foreground">shares</div>
+          </div>
+          <div>
+            <div className="text-xl font-extrabold">
+              {formatAmount(marketValue, currency, false)}
+            </div>
+            <div className="text-right text-sm font-normal text-muted-foreground">{currency}</div>
+          </div>
+        </CardTitle>
       </CardHeader>
 
       <CardContent>
@@ -66,7 +76,7 @@ const SymbolHoldingCard: React.FC<SymbolHoldingProps> = ({ holdingData, classNam
         <div className="space-y-4 text-sm">
           {rows.map(({ label, value, color }, idx) => (
             <div key={idx} className="flex justify-between">
-              <span className="text-gray-600">{label}</span>
+              <span className="text-muted-foreground">{label}</span>
               <span className={`font-medium ${color || ''}`}>{value}</span>
             </div>
           ))}

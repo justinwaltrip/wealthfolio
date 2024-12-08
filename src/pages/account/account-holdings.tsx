@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Holding } from '@/lib/types';
-import { formatAmount } from '@/lib/utils';
+import { formatAmount, formatStockQuantity } from '@/lib/utils';
+import { Link } from 'react-router-dom';
 
 const AccountHoldings = ({ holdings, isLoading }: { holdings: Holding[]; isLoading: boolean }) => {
   if (!isLoading && !holdings.length) {
@@ -26,9 +27,9 @@ const AccountHoldings = ({ holdings, isLoading }: { holdings: Holding[]; isLoadi
           <CardHeader>
             <div className="grid grid-cols-5 gap-4">
               <div className="col-span-2 text-left" />
-              <div className="text-right font-medium text-gray-600">Total value</div>
-              <div className="text-right font-medium text-gray-600">Today’s price</div>
-              <div className="text-right font-medium text-gray-600">All time return</div>
+              <div className="text-right font-medium text-muted-foreground">Total value</div>
+              <div className="text-right font-medium text-muted-foreground">Today’s price</div>
+              <div className="text-right font-medium text-muted-foreground">All time return</div>
             </div>
           </CardHeader>
           <Separator />
@@ -36,18 +37,24 @@ const AccountHoldings = ({ holdings, isLoading }: { holdings: Holding[]; isLoadi
             {holdings.map((holding) => (
               <div key={holding.id} className="grid grid-cols-5 gap-4 border-b p-4">
                 <div className="col-span-2 flex-grow text-left">
-                  <p className="mb-1 font-bold">{holding.symbol}</p>
+                  <p className="mb-1 font-bold">
+                    <Link to={`/holdings/${holding.symbol}`}>{holding.symbol}</Link>
+                  </p>
                   <p className="text-sm">{holding.symbolName}</p>
                 </div>
 
                 <div className="text-right">
-                  <p className="">{formatAmount(holding.marketValue, holding.currency)}</p>
-                  <p className="text-sm text-gray-600">{holding.quantity} shares</p>
+                  <p className="">{formatAmount(holding.marketValueConverted, holding.currency)}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {formatStockQuantity(holding.quantity)} shares
+                  </p>
                 </div>
 
                 <div className="text-right">
-                  <p className=" ">{formatAmount(holding.marketPrice || 0, holding.currency)}</p>
-                  <p className="text-sm text-gray-600">{holding.currency}</p>
+                  <p className=" ">
+                    {formatAmount(holding.marketPrice || 0, holding.currency, false)}
+                  </p>
+                  <p className="text-sm text-muted-foreground">{holding.currency}</p>
                 </div>
 
                 <div className="text-right">

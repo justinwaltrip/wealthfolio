@@ -5,6 +5,12 @@ export enum RUN_ENV {
   UNSUPPORTED = 'unsupported',
 }
 
+declare global {
+  interface Window {
+    __TAURI__?: any;
+  }
+}
+
 export const getRunEnv = (): RUN_ENV => {
   if (typeof window !== 'undefined' && window.__TAURI__) {
     return RUN_ENV.DESKTOP;
@@ -26,4 +32,6 @@ export {
   listenQuotesSyncStartTauri,
   listenQuotesSyncCompleteTauri,
   listenQuotesSyncErrorTauri,
+  openFileSaveDialogTauri,
+  logger,
 } from './tauri';

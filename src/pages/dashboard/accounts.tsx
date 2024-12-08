@@ -16,9 +16,15 @@ const calculateCategorySummary = (accountsInCategory: AccountSummary[]) => {
       total + account.performance.marketValue * (account.performance.exchangeRate || 1),
     0,
   );
-  const bookValue = accountsInCategory.reduce(
+  const totalValue = accountsInCategory.reduce(
     (total, account) =>
-      total + account.performance.bookCost * (account.performance.exchangeRate || 1),
+      total + account.performance.totalValue * (account.performance.exchangeRate || 1),
+    0,
+  );
+
+  const totalNetDeposit = accountsInCategory.reduce(
+    (total, account) =>
+      total + account.performance.netDeposit * (account.performance.exchangeRate || 1),
     0,
   );
 
@@ -28,12 +34,15 @@ const calculateCategorySummary = (accountsInCategory: AccountSummary[]) => {
     0,
   );
 
+  const totalGainPercent =
+    totalNetDeposit !== 0 ? ((totalValue - totalNetDeposit) / totalNetDeposit) * 100 : 0;
+
   return {
     baseCurrency: accountsInCategory[0].performance.baseCurrency,
     totalMarketValue,
     totalCashBalance,
-    totalGainPercent: ((totalMarketValue - bookValue) / bookValue) * 100,
-    totalGainAmount: totalMarketValue - bookValue,
+    totalGainPercent,
+    totalGainAmount: totalValue - totalNetDeposit,
     numberOfAccounts: accountsInCategory.length,
   };
 };
@@ -70,12 +79,18 @@ const AccountSummaryComponent = ({
       <div className="flex items-center">
         <div className="flex flex-col items-end">
           <p className="font-medium leading-none">
-            {formatAmount(
-              accountSummary.performance.totalValue ||
-                accountSummary.performance.totalMarketValue +
-                  accountSummary.performance.totalCashBalance,
-              accountSummary.account.currency,
-            )}
+            {isGroup
+              ? formatAmount(
+                  accountSummary.performance.totalValue ||
+                    accountSummary.performance.totalMarketValue +
+                      accountSummary.performance.totalCashBalance,
+                  accountSummary.account.currency,)
+              : formatAmount(
+                accountSummary.performance.totalValue ||
+                  accountSummary.performance.marketValue +
+                    accountSummary.performance.availableCash,
+                accountSummary.account.currency,)
+            }
           </p>
           {(accountSummary.performance.totalGainPercentage !== 0 ||
             accountSummary.performance.totalGainPercent !== 0) && (
@@ -161,8 +176,8 @@ export function Accounts({
     const categorySummary = calculateCategorySummary(accountsInCategory);
     const isExpanded = expandedCategories[category];
     return (
-      <Card>
-        <CardHeader className="border-b">
+      <Card className="border-none shadow-sm">
+        <CardHeader>
           <AccountSummaryComponent
             accountSummary={{
               account: { id: category, name: category, currency: categorySummary.baseCurrency },
@@ -174,7 +189,7 @@ export function Accounts({
           />
         </CardHeader>
         {isExpanded && (
-          <CardContent className="pt-4">
+          <CardContent className="border-t pt-4">
             {accountsInCategory.map((accountSummary) => (
               <div key={accountSummary.account.id} className="py-4">
                 <AccountSummaryComponent accountSummary={accountSummary} />
@@ -199,7 +214,7 @@ export function Accounts({
             />
           ))}
           {ungroupedAccounts.map((accountSummary) => (
-            <Card key={accountSummary.account.id}>
+            <Card key={accountSummary.account.id} className="border-none shadow-sm">
               <CardHeader className="py-6">
                 <AccountSummaryComponent accountSummary={accountSummary} />
               </CardHeader>
@@ -209,7 +224,7 @@ export function Accounts({
       );
     } else {
       return accounts?.map((accountSummary) => (
-        <Card key={accountSummary.account.id}>
+        <Card key={accountSummary.account.id} className="border-none shadow-sm">
           <CardHeader className="py-6">
             <AccountSummaryComponent accountSummary={accountSummary} />
           </CardHeader>

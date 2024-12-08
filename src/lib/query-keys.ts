@@ -2,13 +2,13 @@ export const QueryKeys = {
   // Account related keys
   ACCOUNTS: 'accounts',
   ACCOUNTS_SUMMARY: 'accounts_summary',
-  ACCOUNTS_HISTORY: 'accounts_history',
 
   // Activity related keys
   ACTIVITY_DATA: 'activity-data',
+  ACTIVITIES: 'activities',
 
   // Portfolio related keys
-  PORTFOLIO_HISTORY: 'portfolio_history',
+  HISTORY: 'history',
   HOLDINGS: 'holdings',
   INCOME_SUMMARY: 'incomeSummary',
 
@@ -24,6 +24,12 @@ export const QueryKeys = {
   EXCHANGE_RATE_SYMBOLS: 'exchange_rate_symbols',
   QUOTE: 'quote',
 
+  CONTRIBUTION_LIMITS: 'contributionLimits',
+  CONTRIBUTION_LIMIT_PROGRESS: 'contributionLimitProgress',
+
+  ASSET_DATA: 'asset_data',
+  IMPORT_MAPPING: 'import_mapping',
+
   // Helper function to create account-specific keys
-  accountHistory: (id: string) => ['account_history', id],
+  accountHistory: (id: string) => ['history', id],
 } as const;

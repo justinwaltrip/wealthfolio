@@ -16,7 +16,6 @@ import { Icons } from '@/components/icons';
 import { Input } from '@/components/ui/input';
 
 import { computeHoldings } from '@/commands/portfolio';
-import { aggregateHoldingsBySymbol } from '@/lib/portfolio-helper';
 import { QueryKeys } from '@/lib/query-keys';
 
 type Sector = {
@@ -33,8 +32,10 @@ export const AssetProfilePage = () => {
   const { symbol = '' } = useParams<{ symbol: string }>();
   const location = useLocation();
 
+  if (!symbol) return null;
+
   const { data, isLoading: isAssetDataLoading } = useQuery<AssetData, Error>({
-    queryKey: ['asset_data', symbol],
+    queryKey: [QueryKeys.ASSET_DATA, symbol],
     queryFn: () => getAssetData(symbol),
   });
 
@@ -46,7 +47,7 @@ export const AssetProfilePage = () => {
 
   // Memoized aggregated holdings
   const aggregatedHoldings = useMemo(() => {
-    return aggregateHoldingsBySymbol(allHoldings || []);
+    return allHoldings?.filter((holding) => holding.account?.id === 'TOTAL') || [];
   }, [allHoldings]);
 
   // Find the specific holding for the current symbol
@@ -79,12 +80,11 @@ export const AssetProfilePage = () => {
 
   const profile = {
     ...data?.asset,
-    marketPrice: quote?.adjclose ?? 0,
+    marketPrice: quote?.close ?? 0,
     totalGainAmount: holding?.performance?.totalGainAmount ?? 0,
     totalGainPercent: holding?.performance?.totalGainPercent ?? 0,
+    calculatedAt: holding?.calculatedAt,
   };
-
-  if (!symbol || !holding) return null;
 
   const symbolHolding = {
     numShares: holding?.quantity,
@@ -92,8 +92,8 @@ export const AssetProfilePage = () => {
     bookValue: holding?.bookValue,
     averagePrice: holding?.averageCost ?? 0,
     portfolioPercent: holding?.portfolioPercent,
-    todaysReturn: (quote?.adjclose ?? 0) - (quote?.open ?? 0),
-    todaysReturnPercent: (((quote?.adjclose ?? 0) - (quote?.open ?? 0)) / (quote?.open ?? 1)) * 100,
+    todaysReturn: (quote?.close ?? 0) - (quote?.open ?? 0),
+    todaysReturnPercent: (((quote?.close ?? 0) - (quote?.open ?? 0)) / (quote?.open ?? 1)) * 100,
     totalReturn: holding?.performance?.totalGainAmount,
     totalReturnPercent: holding?.performance?.totalGainPercent,
     currency: data?.asset.currency || 'USD',
@@ -132,7 +132,8 @@ export const AssetProfilePage = () => {
       <div className="grid grid-cols-1 gap-4 pt-0 md:grid-cols-3">
         {profile && (
           <SymbolCard
-            className="col-span-1 md:col-span-2"
+            symbol={profile?.symbol || holding?.symbol}
+            className={`col-span-1 ${holding ? 'md:col-span-2' : 'md:col-span-3'}`}
             marketPrice={profile?.marketPrice}
             totalGainAmount={profile?.totalGainAmount}
             totalGainPercent={profile?.totalGainPercent}
@@ -140,7 +141,9 @@ export const AssetProfilePage = () => {
             quoteHistory={data?.quoteHistory ?? []}
           />
         )}
-        <SymbolHoldingCard holdingData={symbolHolding} className="col-span-1 md:col-span-1" />
+        {holding && (
+          <SymbolHoldingCard holdingData={symbolHolding} className="col-span-1 md:col-span-1" />
+        )}
       </div>
       <div className="group relative">
         <h3 className="text-lg font-bold">About</h3>
@@ -153,7 +156,7 @@ export const AssetProfilePage = () => {
               value={assetSubClass}
               onChange={(e) => setAssetSubClass(e.target.value)}
               placeholder="Enter sub-class"
-              className="w-[180px] bg-white"
+              className="w-[180px] bg-white dark:bg-neutral-950"
             />
           ) : (
             <Badge variant="secondary" className="uppercase">
@@ -163,7 +166,10 @@ export const AssetProfilePage = () => {
           <Separator orientation="vertical" />
           {isEditing ? (
             <InputTags
-              value={sectors.map((s) => `${s.name}:${s.weight}%`)}
+              value={sectors.map(
+                (s) => `${s.name}:${s.weight <= 1 ? (s.weight * 100).toFixed(0) : s.weight}%`,
+              )}
+              placeholder="sector:weight"
               // @ts-ignore
               onChange={(values: string[]) =>
                 setSectors(
@@ -180,8 +186,8 @@ export const AssetProfilePage = () => {
                 <Badge
                   variant="secondary"
                   key={sector.name}
-                  className="bg-indigo-100 uppercase"
-                  title={`${sector.name}: ${sector.weight < 1 ? (sector.weight * 100).toFixed(2) : sector.weight}%`}
+                  className="cursor-help bg-indigo-100 uppercase dark:text-primary-foreground"
+                  title={`${sector.name}: ${sector.weight <= 1 ? (sector.weight * 100).toFixed(2) : sector.weight}%`}
                 >
                   {sector.name}
                 </Badge>
@@ -191,7 +197,10 @@ export const AssetProfilePage = () => {
           <Separator orientation="vertical" />
           {isEditing ? (
             <InputTags
-              value={countries.map((c) => `${c.code}:${c.weight}%`)}
+              placeholder="country:weight"
+              value={countries.map(
+                (c) => `${c.code}:${c.weight <= 1 ? (c.weight * 100).toFixed(0) : c.weight}%`,
+              )}
               // @ts-ignore
               onChange={(values: string[]) =>
                 setCountries(
@@ -207,8 +216,8 @@ export const AssetProfilePage = () => {
               <Badge
                 variant="secondary"
                 key={country.code}
-                className="bg-purple-100 uppercase"
-                title={`${country.code}: ${country.weight}%`}
+                className="bg-purple-100 uppercase dark:text-primary-foreground"
+                title={`${country.code}: ${country.weight <= 1 ? (country.weight * 100).toFixed(2) : country.weight}%`}
               >
                 {country.code}
               </Badge>
@@ -240,6 +249,7 @@ export const AssetProfilePage = () => {
             <textarea
               className="mt-12 w-full rounded-md border border-neutral-200 p-2 text-sm"
               value={comment}
+              placeholder="Symbol/Company description"
               rows={6}
               onChange={(e) => setComment(e.target.value)}
             />

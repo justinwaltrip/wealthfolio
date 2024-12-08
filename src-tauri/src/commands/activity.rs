@@ -1,9 +1,26 @@
 use crate::activity::activity_service;
+use crate::models::ImportMappingData;
 use crate::models::{
     Activity, ActivityImport, ActivitySearchResponse, ActivityUpdate, NewActivity, Sort,
 };
 use crate::AppState;
+use log::debug;
 use tauri::State;
+
+#[tauri::command]
+pub async fn get_activities(state: State<'_, AppState>) -> Result<Vec<Activity>, String> {
+    debug!("Fetching all activities...");
+    let mut conn = state
+        .pool
+        .get()
+        .map_err(|e| format!("Failed to get connection: {}", e))?;
+    let base_currency = state.base_currency.read().unwrap().clone();
+    let service = activity_service::ActivityService::new(base_currency);
+
+    service
+        .get_activities(&mut conn)
+        .map_err(|e| format!("Failed to fetch activities: {}", e))
+}
 
 #[tauri::command]
 pub async fn search_activities(
@@ -15,7 +32,7 @@ pub async fn search_activities(
     sort: Option<Sort>,
     state: State<'_, AppState>,
 ) -> Result<ActivitySearchResponse, String> {
-    println!("Search activities... {}, {}", page, page_size);
+    debug!("Search activities... {}, {}", page, page_size);
     let mut conn = state
         .pool
         .get()
@@ -41,7 +58,7 @@ pub async fn create_activity(
     activity: NewActivity,
     state: State<'_, AppState>,
 ) -> Result<Activity, String> {
-    println!("Adding new activity...");
+    debug!("Creating activity...");
     let mut conn = state
         .pool
         .get()
@@ -59,7 +76,7 @@ pub async fn update_activity(
     activity: ActivityUpdate,
     state: State<'_, AppState>,
 ) -> Result<Activity, String> {
-    println!("Updating activity...");
+    debug!("Updating activity...");
     let mut conn = state
         .pool
         .get()
@@ -75,13 +92,10 @@ pub async fn update_activity(
 #[tauri::command]
 pub async fn check_activities_import(
     account_id: String,
-    file_path: String,
+    activities: Vec<ActivityImport>,
     state: State<'_, AppState>,
 ) -> Result<Vec<ActivityImport>, String> {
-    println!(
-        "Checking activities import...: {}, {}",
-        account_id, file_path
-    );
+    debug!("Checking activities import for account: {}", account_id);
     let mut conn = state
         .pool
         .get()
@@ -89,7 +103,7 @@ pub async fn check_activities_import(
     let base_currency = state.base_currency.read().unwrap().clone();
     let service = activity_service::ActivityService::new(base_currency);
     service
-        .check_activities_import(&mut conn, account_id, file_path)
+        .check_activities_import(&mut conn, account_id, activities)
         .await
         .map_err(|e| e.to_string())
 }
@@ -99,7 +113,7 @@ pub async fn create_activities(
     activities: Vec<NewActivity>,
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
-    println!("Importing activities...");
+    debug!("Creating activities...");
     let mut conn = state
         .pool
         .get()
@@ -116,7 +130,7 @@ pub async fn delete_activity(
     activity_id: String,
     state: State<'_, AppState>,
 ) -> Result<Activity, String> {
-    println!("Deleting activity...");
+    debug!("Deleting activity...");
     let mut conn = state
         .pool
         .get()
@@ -126,4 +140,40 @@ pub async fn delete_activity(
     service
         .delete_activity(&mut conn, activity_id)
         .map_err(|e| format!("Failed to delete activity: {}", e))
+}
+
+#[tauri::command]
+pub async fn get_account_import_mapping(
+    account_id: String,
+    state: State<'_, AppState>,
+) -> Result<ImportMappingData, String> {
+    debug!("Getting import mapping for account: {}", account_id);
+    let mut conn = state
+        .pool
+        .get()
+        .map_err(|e| format!("Failed to get connection: {}", e))?;
+    let base_currency = state.base_currency.read().unwrap().clone();
+    let service = activity_service::ActivityService::new(base_currency);
+
+    service
+        .get_import_mapping(&mut conn, account_id)
+        .map_err(|e| format!("Failed to get import mapping: {}", e))
+}
+
+#[tauri::command]
+pub async fn save_account_import_mapping(
+    mapping: ImportMappingData,
+    state: State<'_, AppState>,
+) -> Result<ImportMappingData, String> {
+    debug!("Saving import mapping for account: {}", mapping.account_id);
+    let mut conn = state
+        .pool
+        .get()
+        .map_err(|e| format!("Failed to get connection: {}", e))?;
+    let base_currency = state.base_currency.read().unwrap().clone();
+    let service = activity_service::ActivityService::new(base_currency);
+
+    service
+        .save_import_mapping(&mut conn, mapping)
+        .map_err(|e| format!("Failed to save import mapping: {}", e))
 }

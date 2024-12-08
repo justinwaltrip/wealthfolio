@@ -34,6 +34,17 @@ diesel::table! {
 }
 
 diesel::table! {
+    activity_import_profiles (account_id) {
+        account_id -> Text,
+        field_mappings -> Text,
+        activity_mappings -> Text,
+        symbol_mappings -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     app_settings (setting_key) {
         setting_key -> Text,
         setting_value -> Text,
@@ -61,6 +72,18 @@ diesel::table! {
         data_source -> Text,
         sectors -> Nullable<Text>,
         url -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    contribution_limits (id) {
+        id -> Text,
+        group_name -> Text,
+        contribution_year -> Integer,
+        limit_amount -> Double,
+        account_ids -> Nullable<Text>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
     }
 }
 
@@ -122,6 +145,7 @@ diesel::table! {
         allocation_percentage -> Double,
         exchange_rate -> Double,
         holdings -> Nullable<Text>,
+        calculated_at -> Timestamp,
     }
 }
 
@@ -151,8 +175,10 @@ diesel::joinable!(quotes -> assets (symbol));
 diesel::allow_tables_to_appear_in_same_query!(
     accounts,
     activities,
+    activity_import_profiles,
     app_settings,
     assets,
+    contribution_limits,
     exchange_rates,
     goals,
     goals_allocation,

@@ -1,6 +1,11 @@
+use bigdecimal::BigDecimal;
+use chrono::NaiveDateTime;
 use diesel::prelude::*;
+use diesel::Queryable;
+use diesel::Selectable;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
 #[derive(Queryable, Identifiable, AsChangeset, Serialize, Deserialize, Debug)]
 #[diesel(table_name= crate::schema::platforms)]
 #[serde(rename_all = "camelCase")]
@@ -267,6 +272,7 @@ pub struct ActivityDetails {
     pub account_currency: String,
     pub asset_symbol: String,
     pub asset_name: Option<String>,
+    pub asset_data_source: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -282,7 +288,7 @@ pub struct ActivitySearchResponse {
     pub meta: ActivitySearchResponseMeta,
 }
 
-#[derive(Serialize, Debug, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityImport {
     pub id: Option<String>,
@@ -298,26 +304,46 @@ pub struct ActivityImport {
     pub account_name: Option<String>,
     pub symbol_name: Option<String>,
     pub error: Option<String>,
-    pub is_draft: Option<String>,
-    pub is_valid: Option<String>,
+    pub is_draft: bool,
+    pub is_valid: bool,
     pub line_number: Option<i32>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Performance {
-    pub total_gain_percent: f64,
-    pub total_gain_amount: f64,
-    pub total_gain_amount_converted: f64,
-    pub day_gain_percent: Option<f64>,
-    pub day_gain_amount: Option<f64>,
-    pub day_gain_amount_converted: Option<f64>,
+    pub total_gain_percent: BigDecimal,
+    pub total_gain_amount: BigDecimal,
+    pub total_gain_amount_converted: BigDecimal,
+    pub day_gain_percent: Option<BigDecimal>,
+    pub day_gain_amount: Option<BigDecimal>,
+    pub day_gain_amount_converted: Option<BigDecimal>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+impl Default for Performance {
+    fn default() -> Self {
+        Performance {
+            total_gain_percent: BigDecimal::from(0),
+            total_gain_amount: BigDecimal::from(0),
+            total_gain_amount_converted: BigDecimal::from(0),
+            day_gain_percent: Some(BigDecimal::from(0)),
+            day_gain_amount: Some(BigDecimal::from(0)),
+            day_gain_amount_converted: Some(BigDecimal::from(0)),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Sector {
     pub name: String,
+    pub weight: f64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Country {
+    pub code: String,
     pub weight: f64,
 }
 
@@ -328,20 +354,23 @@ pub struct Holding {
     pub symbol: String,
     pub symbol_name: Option<String>,
     pub holding_type: String,
-    pub quantity: f64,
+    pub quantity: BigDecimal,
     pub currency: String,
     pub base_currency: String,
-    pub market_price: Option<f64>,
-    pub average_cost: Option<f64>,
-    pub market_value: f64,
-    pub book_value: f64,
-    pub market_value_converted: f64,
-    pub book_value_converted: f64,
+    pub market_price: Option<BigDecimal>,
+    pub average_cost: Option<BigDecimal>,
+    pub market_value: BigDecimal,
+    pub book_value: BigDecimal,
+    pub market_value_converted: BigDecimal,
+    pub book_value_converted: BigDecimal,
     pub performance: Performance,
     pub account: Option<Account>,
     pub asset_class: Option<String>,
     pub asset_sub_class: Option<String>,
+    pub asset_data_source: Option<String>,
     pub sectors: Option<Vec<Sector>>,
+    pub countries: Option<Vec<Country>>,
+    pub portfolio_percent: Option<BigDecimal>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -412,6 +441,15 @@ pub struct AppSetting {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    pub theme: String,
+    pub font: String,
+    pub base_currency: String,
+    pub instance_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsUpdate {
     pub theme: String,
     pub font: String,
     pub base_currency: String,
@@ -533,15 +571,15 @@ impl IncomeSummary {
         self.total_income += converted_amount;
     }
 
-    pub fn calculate_monthly_average(&mut self, num_months: Option<f64>) {
-        let months = num_months.unwrap_or_else(|| self.by_month.len() as f64);
-        if months > 0.0 {
-            self.monthly_average = self.total_income / months;
+    pub fn calculate_monthly_average(&mut self, num_months: Option<u32>) {
+        let months = num_months.unwrap_or_else(|| self.by_month.len() as u32);
+        if months > 0 {
+            self.monthly_average = self.total_income / (months as f64);
         }
     }
 }
 
-#[derive(Debug, Clone, Queryable, Insertable, Serialize, Deserialize)]
+#[derive(Debug, Clone, Queryable, QueryableByName, Insertable, Serialize, Deserialize)]
 #[diesel(table_name = crate::schema::portfolio_history)]
 #[serde(rename_all = "camelCase")]
 pub struct PortfolioHistory {
@@ -561,7 +599,8 @@ pub struct PortfolioHistory {
     pub day_gain_value: f64,
     pub allocation_percentage: f64,
     pub exchange_rate: f64,
-    pub holdings: Option<String>, // Holdings JSON
+    pub holdings: Option<String>,
+    pub calculated_at: NaiveDateTime,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -603,4 +642,148 @@ pub struct NewExchangeRate {
     pub to_currency: String,
     pub rate: f64,
     pub source: String,
+}
+
+#[derive(Queryable, Insertable, Identifiable, Serialize, Deserialize, Debug, Clone)]
+#[diesel(table_name = crate::schema::contribution_limits)]
+#[serde(rename_all = "camelCase")]
+pub struct ContributionLimit {
+    pub id: String,
+    pub group_name: String,
+    pub contribution_year: i32,
+    pub limit_amount: f64,
+    pub account_ids: Option<String>, // New field to store account IDs
+    pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime,
+}
+
+#[derive(Insertable, AsChangeset, Serialize, Deserialize, Debug, Clone)]
+#[diesel(table_name = crate::schema::contribution_limits)]
+#[serde(rename_all = "camelCase")]
+pub struct NewContributionLimit {
+    pub id: Option<String>,
+    pub group_name: String,
+    pub contribution_year: i32,
+    pub limit_amount: f64,
+    pub account_ids: Option<String>, // New field to store account IDs
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountDeposit {
+    pub amount: f64,
+    pub currency: String,
+    pub converted_amount: f64,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DepositsCalculation {
+    pub total: f64,
+    pub base_currency: String,
+    pub by_account: HashMap<String, AccountDeposit>,
+}
+
+#[derive(
+    Debug, Clone, Serialize, Deserialize, Queryable, Identifiable, AsChangeset, Insertable,
+)]
+#[diesel(primary_key(account_id))]
+#[diesel(table_name = crate::schema::activity_import_profiles)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[serde(rename_all = "camelCase")]
+pub struct ImportMapping {
+    pub account_id: String,
+    pub field_mappings: String,
+    pub activity_mappings: String,
+    pub symbol_mappings: String,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportMappingData {
+    pub account_id: String,
+    pub field_mappings: HashMap<String, String>,
+    pub activity_mappings: HashMap<String, Vec<String>>,
+    pub symbol_mappings: HashMap<String, String>,
+}
+
+impl Default for ImportMappingData {
+    fn default() -> Self {
+        let mut field_mappings = HashMap::new();
+        field_mappings.insert("date".to_string(), "date".to_string());
+        field_mappings.insert("symbol".to_string(), "symbol".to_string());
+        field_mappings.insert("quantity".to_string(), "quantity".to_string());
+        field_mappings.insert("activityType".to_string(), "activityType".to_string());
+        field_mappings.insert("unitPrice".to_string(), "unitPrice".to_string());
+        field_mappings.insert("currency".to_string(), "currency".to_string());
+        field_mappings.insert("fee".to_string(), "fee".to_string());
+
+        let mut activity_mappings = HashMap::new();
+        activity_mappings.insert("BUY".to_string(), vec!["BUY".to_string()]);
+        activity_mappings.insert("SELL".to_string(), vec!["SELL".to_string()]);
+        activity_mappings.insert("DIVIDEND".to_string(), vec!["DIVIDEND".to_string()]);
+        activity_mappings.insert("INTEREST".to_string(), vec!["INTEREST".to_string()]);
+        activity_mappings.insert("DEPOSIT".to_string(), vec!["DEPOSIT".to_string()]);
+        activity_mappings.insert("WITHDRAWAL".to_string(), vec!["WITHDRAWAL".to_string()]);
+        activity_mappings.insert("TRANSFER_IN".to_string(), vec!["TRANSFER_IN".to_string()]);
+        activity_mappings.insert("TRANSFER_OUT".to_string(), vec!["TRANSFER_OUT".to_string()]);
+        activity_mappings.insert("SPLIT".to_string(), vec!["SPLIT".to_string()]);
+        activity_mappings.insert(
+            "CONVERSION_IN".to_string(),
+            vec!["CONVERSION_IN".to_string()],
+        );
+        activity_mappings.insert(
+            "CONVERSION_OUT".to_string(),
+            vec!["CONVERSION_OUT".to_string()],
+        );
+        activity_mappings.insert("FEE".to_string(), vec!["FEE".to_string()]);
+        activity_mappings.insert("TAX".to_string(), vec!["TAX".to_string()]);
+
+        ImportMappingData {
+            account_id: String::new(),
+            field_mappings,
+            activity_mappings,
+            symbol_mappings: HashMap::new(),
+        }
+    }
+}
+
+impl ImportMapping {
+    pub fn to_mapping_data(&self) -> Result<ImportMappingData, serde_json::Error> {
+        let mut mapping_data = ImportMappingData::default();
+        mapping_data.account_id = self.account_id.clone();
+        mapping_data.field_mappings = serde_json::from_str(&self.field_mappings)?;
+        mapping_data.activity_mappings = serde_json::from_str(&self.activity_mappings)?;
+        mapping_data.symbol_mappings = serde_json::from_str(&self.symbol_mappings)?;
+        Ok(mapping_data)
+    }
+
+    pub fn from_mapping_data(data: &ImportMappingData) -> Result<Self, serde_json::Error> {
+        Ok(Self {
+            account_id: data.account_id.clone(),
+            field_mappings: serde_json::to_string(&data.field_mappings)?,
+            activity_mappings: serde_json::to_string(&data.activity_mappings)?,
+            symbol_mappings: serde_json::to_string(&data.symbol_mappings)?,
+            created_at: chrono::Utc::now().naive_utc(),
+            updated_at: chrono::Utc::now().naive_utc(),
+        })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CumulativeReturn {
+    pub date: String,
+    pub value: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CumulativeReturns {
+    pub id: String,
+    pub cumulative_returns: Vec<CumulativeReturn>,
+    pub total_return: f64,
+    pub annualized_return: f64,
 }

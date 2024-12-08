@@ -72,7 +72,6 @@ export default function IncomePage() {
     queryFn: getIncomeSummary,
   });
 
-  console.log(incomeData);
   if (isLoading) {
     return <IncomeDashboardSkeleton />;
   }
@@ -86,12 +85,24 @@ export default function IncomePage() {
 
   if (!periodSummary || !totalSummary) {
     return (
-      <EmptyPlaceholder
-        className="mx-auto max-w-[420px]"
-        icon={<Icons.DollarSign className="h-10 w-10" />}
-        title="No income data available"
-        description="There is no income data for the selected period. Try selecting a different time range or check back later."
-      />
+      <ApplicationShell className="p-6">
+        <ApplicationHeader heading="Investment Income">
+          <div className="flex items-center space-x-2">
+            <IncomePeriodSelector
+              selectedPeriod={selectedPeriod}
+              onPeriodSelect={setSelectedPeriod}
+            />
+          </div>
+        </ApplicationHeader>
+        <div className="flex h-[calc(100vh-200px)] items-center justify-center">
+          <EmptyPlaceholder
+            className="mx-auto flex max-w-[420px] items-center justify-center"
+            icon={<Icons.DollarSign className="h-10 w-10" />}
+            title="No income data available"
+            description="There is no income data for the selected period. Try selecting a different time range or check back later."
+          />
+        </div>
+      </ApplicationShell>
     );
   }
 
@@ -162,7 +173,7 @@ export default function IncomePage() {
       </ApplicationHeader>
       <div className="space-y-6">
         <div className="grid gap-6 md:grid-cols-3">
-          <Card className="border-success-background/30 bg-success-background/30">
+          <Card className="border-success-background/30 bg-success-background/30 dark:border-primary/20 dark:bg-primary/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">
                 {selectedPeriod === 'TOTAL'
@@ -195,7 +206,7 @@ export default function IncomePage() {
                     )}
                   </div>
                 </div>
-                <div className="h-12 w-12">
+                <div className="h-16 w-16">
                   <ChartContainer
                     config={currencyData.reduce(
                       (acc: Record<string, { label: string; color: string }>, item, index) => {
@@ -207,13 +218,13 @@ export default function IncomePage() {
                       },
                       {},
                     )}
-                    className="mx-auto aspect-square max-h-[48px]"
+                    className="mx-auto aspect-square max-h-[62px]"
                   >
                     <PieChart>
                       <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
-                      <Pie data={currencyData} dataKey="amount" nameKey="currency">
+                      <Pie data={currencyData} dataKey="amount" nameKey="currency" paddingAngle={4}>
                         {currencyData.map((_entry, index) => (
-                          <Cell key={`cell-${index}`} fill={`hsl(var(--chart-${index + 3}))`} />
+                          <Cell key={`cell-${index}`} fill={`hsl(var(--chart-${index + 2}))`} />
                         ))}
                       </Pie>
                     </PieChart>
@@ -222,7 +233,7 @@ export default function IncomePage() {
               </div>
             </CardContent>
           </Card>
-          <Card className="border-indigo-200 bg-indigo-100 dark:border-indigo-300/30 dark:bg-indigo-300/30">
+          <Card className="border-indigo-200 bg-indigo-100 dark:border-primary/20 dark:bg-primary/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Monthly Average</CardTitle>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
@@ -235,7 +246,7 @@ export default function IncomePage() {
               </div>
             </CardContent>
           </Card>
-          <Card className="border-purple-200 bg-purple-100 dark:border-purple-300/30 dark:bg-purple-300/30">
+          <Card className="border-purple-200 bg-purple-100 dark:border-primary/20 dark:bg-primary/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Income Sources</CardTitle>
               <PieChartIcon className="h-4 w-4 text-muted-foreground" />
@@ -260,7 +271,7 @@ export default function IncomePage() {
                         <span className="text-xs">{source.name}</span>
                         <span className="text-xs text-muted-foreground">{source.amount}</span>
                       </div>
-                      <div className="relative h-4 w-full rounded-full bg-purple-200 dark:bg-purple-300/30">
+                      <div className="relative h-4 w-full rounded-full bg-primary/20">
                         <div
                           className="flex h-4 items-center justify-center rounded-full bg-primary text-xs text-background"
                           style={{ width: `${source.percentage}%` }}
@@ -292,7 +303,7 @@ export default function IncomePage() {
             <CardContent>
               {monthlyIncomeData.length === 0 ? (
                 <EmptyPlaceholder
-                  className="mx-auto max-w-[420px]"
+                  className="mx-auto flex h-[300px] max-w-[420px] items-center justify-center"
                   icon={<Icons.Activity className="h-10 w-10" />}
                   title="No income history available"
                   description="There is no income history for the selected period. Try selecting a different time range or check back later."
@@ -372,7 +383,7 @@ export default function IncomePage() {
             <CardContent className="h-full">
               {topDividendStocks.length === 0 ? (
                 <EmptyPlaceholder
-                  className="mx-auto max-w-[420px]"
+                  className="mx-auto flex h-[300px] max-w-[420px] items-center justify-center"
                   icon={<Icons.DollarSign className="h-10 w-10" />}
                   title="No dividend income recorded"
                   description="There are no dividend sources for the selected period. Try selecting a different time range or check back later."
@@ -382,7 +393,7 @@ export default function IncomePage() {
                   {topDividendStocks.map(([symbol, income], index) => (
                     <div key={index} className="flex items-center justify-between">
                       <div className="flex items-center">
-                        <Badge className="mr-2 flex min-w-[55px] items-center justify-center rounded-sm bg-secondary text-xs text-foreground">
+                        <Badge className="mr-2 flex min-w-[55px] items-center justify-center rounded-sm bg-primary text-xs">
                           {symbol.match(/\[(.*?)\]/)?.[1] || symbol}
                         </Badge>
                         <span className="mr-16 text-xs text-muted-foreground">
